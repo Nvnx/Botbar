@@ -152,7 +152,17 @@ function Get-Sessions {
     $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
     foreach ($f in Get-ChildItem $sessionDir -Filter *.json -ErrorAction SilentlyContinue) {
         try { $j = Get-Content $f.FullName -Raw -ErrorAction Stop | ConvertFrom-Json } catch { continue }
-        if (-not $j.pid -or -not (Get-Process -Id $j.pid -ErrorAction SilentlyContinue)) { continue }
+        if (-not $j.pid) { continue }
+        $proc = Get-Process -Id $j.pid -ErrorAction SilentlyContinue
+        if (-not $proc) { continue }
+        # A crashed session can leave its file behind, and Windows may hand its PID to another
+        # program later. procStart is the process start time (UTC FILETIME), so a mismatch means
+        # the PID now belongs to someone else. If the start time can't be read (an elevated
+        # process), trust the PID.
+        if ($j.procStart) {
+            $started = try { $proc.StartTime.ToFileTimeUtc() } catch { $null }
+            if ($null -ne $started -and "$started" -ne "$($j.procStart)") { continue }
+        }
 
         # Claude Code writes busy / shell while working, waiting (with a waitingFor reason)
         # when it is blocked on the user, and idle once the turn is over.
